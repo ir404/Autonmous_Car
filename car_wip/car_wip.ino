@@ -16,7 +16,6 @@
 #define MOTOR_FORWARD       18
 #define MOTOR_REVERSE       19
 #define MOTOR_SPEED          5              // PWM pin for speed control (ENA)
-#define MOTOR_PWM_CHANNEL    0              // Motor channel
 #define SERVO_PIN           13              // Servo for to steer the front wheels
 #define TRIG_PIN            12              // Ultrasonic sensor - trigger 
 #define ECHO_PIN            14              // Ultrasonic sensor - echo
@@ -111,18 +110,16 @@ void loop() {
     } 
     else {                    // car's turned on
         
-        ledcWrite(MOTOR_SPEED, carSpeed);   // assign the speed set by the user
-
         // move the car based on button press
-        if (moveFwd == 1 && moveBack == 1) {
-            turnOffMotor();
-        } else if (moveFwd == 1) {
+        if (moveFwd == 1 && moveBack == 0) {
             goFwd();
-        } else if (moveBack == 1) {
+            ledcWrite(MOTOR_SPEED, carSpeed);
+        } else if (moveFwd == 0 && moveBack == 1) {
             reverse();
+            ledcWrite(MOTOR_SPEED, carSpeed);
         } else {
-            // when idle
             turnOffMotor();
+            ledcWrite(MOTOR_SPEED, 0);
         }
 
         // diagnostics (remove later? if so, don't forget to update the pins of the datastreams!)

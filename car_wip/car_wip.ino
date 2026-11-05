@@ -1,47 +1,54 @@
 /*
-    Project - Autonmous Car 
+    Project - Autonomous Car 
+    Work In Progress
+
+    Filename: car_wip.ino
 */
 
 // Credentials to connect to the BLYNK cloud server
-#define BLYNK_TEMPLATE_ID   ""
-#define BLYNK_TEMPLATE_NAME ""
-#define BLYNK_AUTH_TOKEN    ""
-
+#define BLYNK_TEMPLATE_ID   "TMPL4KiGQUURr"
+#define BLYNK_TEMPLATE_NAME "Autonomous Car"
+#define BLYNK_AUTH_TOKEN    "gZRYmLaNVw15s1G7R_Es9JNCc5wzFa1b"
 
 // Libraries
 #include <ESP32Servo.h>                     // version used: 3.0.5
 #include <BlynkSimpleEsp32.h>               // version used: 1.4.0
 
-
 #define MOTOR_FORWARD       18
 #define MOTOR_REVERSE       19
 #define MOTOR_SPEED          5              // PWM pin for speed control (ENA)
-#define SERVO_PIN           13              // Servo for to steer the front wheels
+#define SERVO_PIN           13              // Servo to steer the front wheels
+#define SWEEP_SERVO_PIN      4              // Servo for ultrasonic sensor sweep
 #define TRIG_PIN            12              // Ultrasonic sensor - trigger 
 #define ECHO_PIN            14              // Ultrasonic sensor - echo
 
 Servo steeringServo;
+Servo sweepServo;                           // Object for the sweeping ultrasonic sensor servo
 
 const int MOTOR_SPEED_VALUE = 200;          // PWM value: 0–255
+const int STEERING_STEP = 2;                // Degrees to step per loop cycle (steering speed)
 
-// Wifi Credentials (e.g. mobile hotspot)
-char ssid[] = "";       // hotspot name
-char pass[] = "";       // hotspot password
+// Wi-Fi Credentials (e.g. mobile hotspot)
+char ssid[] = "";               // hotspot name
+char pass[] = "";               // hotspot password
 
 // Blynk datastreams 
-int carOn = 0;                      // a switch (V0)
-int moveFwd = 0;                    // a button (V1)
-int moveBack = 0;                   // a button (V2)
-int carSpeed = 200;                 // a slider (V3), scale 0 to 255
-int testSteering = 0;               // a button (V4)
+int carOn_DS    = 0;                        // a switch (V0)
+int btnFwd_DS   = 0;                        // a button (V1)
+int btnBack_DS  = 0;                        // a button (V2)
+int carSpeed_DS = 200;                      // a slider (V3), scale 0 to 255
+int carX_DS     = 512;                      // joystick X-axis (V4)
+int carY_DS     = 512;                      // joystick Y-axis (V5)
 
+// Steering smoothing variables
+int currentAngle = 90;                      // Tracks the physical servo position
 
 void setup() {
     // Initialise Blynk connection
     Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
 
     // Configure PWM for motor speed control
-    ledcAttach(MOTOR_SPEED, 1000, 8);                // 1 kHz, 8-bit resolution 
+    ledcAttach(MOTOR_SPEED, 1000, 8);        // 1 kHz, 8-bit resolution 
 
     // Configure motor control pins
     pinMode(MOTOR_FORWARD, OUTPUT);
@@ -54,48 +61,56 @@ void setup() {
     // Init servo
     steeringServo.attach(SERVO_PIN, 500, 2500);
     
-    // Put the car in idle (i.e. motor's off, steering centered)
-    turnOffMotor();                                 
-    ledcWrite(MOTOR_SPEED, 0);                      // init speed to 0 (disables the PWM signal)
-    steeringServo.write(90);                        // starting angle of 90 degree (center)
+    // Put the car in idle (i.e. motor off, steering centred)
+    turnOffMotor();
+    steeringServo.write(90);                // starting angle of 90 degrees (centre)
 }
 
-// Receive virtual pin states from Blynk server. 
-// The pin ids (Vi) should match the datastreams configured in the server.
+// Receive virtual pin states from Blynk server.
 BLYNK_WRITE(V0) {
-    carOn = param.asInt();
+    carOn_DS = param.asInt();
 }
 BLYNK_WRITE(V1) {
-    moveFwd = param.asInt();
+    btnFwd_DS = param.asInt();
 }
 BLYNK_WRITE(V2) {
-    moveBack = param.asInt();
+    btnBack_DS = param.asInt();
 }
 BLYNK_WRITE(V3) {
-    carSpeed = param.asInt();
+    carSpeed_DS = param.asInt();
 }
 BLYNK_WRITE(V4) {
-    testSteering = param.asInt();
+    carX_DS = param.asInt();
+}
+BLYNK_WRITE(V5) {
+    carY_DS = param.asInt();
 }
 
 // car halts
 void turnOffMotor() {
     digitalWrite(MOTOR_FORWARD, LOW);
     digitalWrite(MOTOR_REVERSE, LOW);
+    ledcWrite(MOTOR_SPEED, 0);              // ensure PWM signal is fully disabled
 }
+
 // car drives forward
 void goFwd() {
     digitalWrite(MOTOR_FORWARD, HIGH);
     digitalWrite(MOTOR_REVERSE, LOW);
+    ledcWrite(MOTOR_SPEED, carSpeed_DS);
 }
+
 // car reverses
 void reverse() {
     digitalWrite(MOTOR_FORWARD, LOW);
     digitalWrite(MOTOR_REVERSE, HIGH);
+    ledcWrite(MOTOR_SPEED, carSpeed_DS);
 }
 
-
 void loop() {
+    // Wait 5ms before the next cycle (needed for smooth steering)
+    delay(5);
+
     // Get incoming cloud messages and maintain the connection
     Blynk.run();
 
@@ -103,45 +118,45 @@ void loop() {
     // TODO!
     // ------------------------------------------------------------
 
-    if (carOn == 0) {           // car's turned off
+    if (carOn_DS == 0) {                       // car is turned off
         turnOffMotor();
-        steeringServo.write(90);            // return steering to center
-        ledcWrite(MOTOR_SPEED, 0);          // ensure PWM signal is fully disabled
+        currentAngle = 90;                  // keep internal tracker aligned with physical state
+        steeringServo.write(90);            // return steering to centre
     } 
-    else {                    // car's turned on
-        
-        // move the car based on button press
-        if (moveFwd == 1 && moveBack == 0) {
+    else {                                  // car is turned on
+
+        // --- Movement Logic ---
+        if ((btnFwd_DS == 1 && btnBack_DS == 0) || (carY_DS >= 600)) {
             goFwd();
-            ledcWrite(MOTOR_SPEED, carSpeed);
-        } else if (moveFwd == 0 && moveBack == 1) {
+        } 
+        else if ((btnFwd_DS == 0 && btnBack_DS == 1) || (carY_DS <= 400)) {
             reverse();
-            ledcWrite(MOTOR_SPEED, carSpeed);
-        } else {
+        } 
+        else {
+            // Only halt if BOTH the buttons and the joystick are idle
             turnOffMotor();
-            ledcWrite(MOTOR_SPEED, 0);
         }
 
-        // diagnostics (remove later? if so, don't forget to update the pins of the datastreams!)
-        if (testSteering == 1) {
-            // --- SERVO TEST SEQUENCE ---
-            // Steer Left (approx 45 degrees)
-            steeringServo.write(45);
-            delay(100);    
-            // Steer Center (90 degrees)
-            steeringServo.write(90);
-            delay(100);
-            // Steer Right (approx 135 degrees)
-            steeringServo.write(135);
-            delay(100);
-            
-            // Return to Center before moving
-            steeringServo.write(90);
-            delay(100);
-            // ---------------------------
+        // --- Joystick Steering Control ---
+        int targetAngle;
+        if (carX_DS >= 450 && carX_DS <= 550) {
+            targetAngle = 90;               // Deadzone: target straight ahead
+        } 
+        else {
+            // Map active steering (45 left, 135 right)
+            targetAngle = map(carX_DS, 0, 1023, 45, 135);
         }
+        // Smoothly step the physical angle towards the target angle
+        if (currentAngle < targetAngle) {
+            currentAngle += STEERING_STEP;
+            if (currentAngle > targetAngle) currentAngle = targetAngle; // Prevent overshooting
+        } 
+        else if (currentAngle > targetAngle) {
+            currentAngle -= STEERING_STEP;
+            if (currentAngle < targetAngle) currentAngle = targetAngle; // Prevent overshooting
+        }
+        
+        // Write the incrementally smoothed angle to the servo
+        steeringServo.write(currentAngle);
     }
-
-    // Wait 10ms before the next cycle
-    delay(10);
 }

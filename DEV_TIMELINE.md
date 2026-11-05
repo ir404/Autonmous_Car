@@ -22,3 +22,13 @@ This document tracks our team's weekly progress, hardware learnings, and softwar
 *   **Blynk Server Setup:** Created a project on the Blynk IoT server, generated our auth tokens, and configured our virtual datastreams.
 *   **Mobile Interface:** Built a basic User Interface in the Blynk mobile app (buttons for forward/reverse, a switch for power, and a slider for speed). 
 *   **Milestone:** Successfully connected the car to the mobile app hotspot and remote-controlled the steering and drive motors over the cloud!
+
+## Session 4: 5 November 2026
+* **Code Refactoring:** Restructured the codebase into modular functions to resolve hardware timer conflicts and logic collisions.
+* **Joystick Mapping:** Mapped Blynk joystick X and Y axes to proportionally control motor speed (throttle) and steering angles.
+* **Steering Smoothing:** Implemented a slew rate limiter (stepping algorithm) to prevent servo jitter and smooth out wheel turns.
+* **Diagnostics:** Developed standalone test scripts ahead of hardware integration:
+    * [Isolated Steering Test](diagnostics/steering_test.ino)
+    * [Standalone Ultrasonic Test](diagnostics/ultrasonic_test.ino)
+    * [Obstacle Auto-Stop Test](diagnostics/obstacle_stop_test.ino)
+    * [Radar Sweep & Autonomous Steering Test](diagnostics/radar_steering_test.ino)

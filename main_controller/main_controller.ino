@@ -1,19 +1,24 @@
 /*
-    Project - Autonomous Car 
-    Work In Progress
-
-    Filename: car_wip.ino
-*/
+ * Project: SmartDrive – Autonomous Vehicle Project
+ * File: main_controller.ino
+ * 
+ * Description: 
+ * Master control firmware for an ESP32-based robotic vehicle. 
+ * Handles IoT cloud connectivity via Blynk, featuring a dual-state 
+ * architecture for manual remote teleoperation and autonomous 
+ * obstacle avoidance (sensor sweep integration pending).
+ */
 
 // Credentials to connect to the BLYNK cloud server
-#define BLYNK_TEMPLATE_ID   "TMPL4KiGQUURr"
-#define BLYNK_TEMPLATE_NAME "Autonomous Car"
-#define BLYNK_AUTH_TOKEN    "gZRYmLaNVw15s1G7R_Es9JNCc5wzFa1b"
+#define BLYNK_TEMPLATE_ID   ""
+#define BLYNK_TEMPLATE_NAME ""
+#define BLYNK_AUTH_TOKEN    ""
 
 // Libraries
 #include <ESP32Servo.h>                     // version used: 3.0.5
 #include <BlynkSimpleEsp32.h>               // version used: 1.4.0
 
+// Pin connections
 #define MOTOR_FORWARD       18
 #define MOTOR_REVERSE       19
 #define MOTOR_SPEED          5              // PWM pin for speed control (ENA)
@@ -32,13 +37,14 @@ const int STEERING_STEP = 2;                // Degrees to step per loop cycle (s
 char ssid[] = "";               // hotspot name
 char pass[] = "";               // hotspot password
 
-// Blynk datastreams 
+// Blynk datastreams (DS)
 int carOn_DS    = 0;                        // a switch (V0)
 int btnFwd_DS   = 0;                        // a button (V1)
 int btnBack_DS  = 0;                        // a button (V2)
 int carSpeed_DS = 200;                      // a slider (V3), scale 0 to 255
 int carX_DS     = 512;                      // joystick X-axis (V4)
 int carY_DS     = 512;                      // joystick Y-axis (V5)
+int autoMode_DS = 0;                        // a button (V6)
 
 // Steering smoothing variables
 int currentAngle = 90;                      // Tracks the physical servo position
@@ -58,12 +64,14 @@ void setup() {
     pinMode(TRIG_PIN, OUTPUT);
     pinMode(ECHO_PIN, INPUT);
 
-    // Init servo
+    // Init servos
     steeringServo.attach(SERVO_PIN, 500, 2500);
+    sweepServo.attach(SWEEP_SERVO_PIN, 500, 2500);
     
     // Put the car in idle (i.e. motor off, steering centred)
     turnOffMotor();
     steeringServo.write(90);                // starting angle of 90 degrees (centre)
+    sweepServo.write(90);                   // starting sweep angle of 90 degrees (centre)
 }
 
 // Receive virtual pin states from Blynk server.
@@ -84,6 +92,9 @@ BLYNK_WRITE(V4) {
 }
 BLYNK_WRITE(V5) {
     carY_DS = param.asInt();
+}
+BLYNK_WRITE(V6) {
+    autoMode_DS = param.asInt();
 }
 
 // car halts
@@ -125,38 +136,41 @@ void loop() {
     } 
     else {                                  // car is turned on
 
-        // --- Movement Logic ---
-        if ((btnFwd_DS == 1 && btnBack_DS == 0) || (carY_DS >= 600)) {
-            goFwd();
-        } 
-        else if ((btnFwd_DS == 0 && btnBack_DS == 1) || (carY_DS <= 400)) {
-            reverse();
-        } 
-        else {
-            // Only halt if BOTH the buttons and the joystick are idle
+        if (autoMode_DS == 1) {     // Auto mode
+            // temporary safety stop
             turnOffMotor();
+            // TODO: implement radar sweep and path decision logic
         }
+        else {                      // Manual remote control
+            // ----- forward/reverse movement logic -----
+            if ((btnFwd_DS == 1 && btnBack_DS == 0) || (carY_DS >= 600)) {
+                goFwd();
+            } 
+            else if ((btnFwd_DS == 0 && btnBack_DS == 1) || (carY_DS <= 400)) {
+                reverse();
+            } 
+            else {
+                turnOffMotor();
+            }
 
-        // --- Joystick Steering Control ---
-        int targetAngle;
-        if (carX_DS >= 450 && carX_DS <= 550) {
-            targetAngle = 90;               // Deadzone: target straight ahead
-        } 
-        else {
-            // Map active steering (45 left, 135 right)
-            targetAngle = map(carX_DS, 0, 1023, 45, 135);
+            // ----- steering control -----
+            int targetAngle;
+            if (carX_DS >= 450 && carX_DS <= 550) {
+                targetAngle = 90;                                   // deadzone - return steering to centre
+            } 
+            else {
+                targetAngle = map(carX_DS, 0, 1023, 45, 135);       // map active steering (45 left, 135 right)
+            }
+            // Smoothly step the physical angle towards the target angle
+            if (currentAngle < targetAngle) {
+                currentAngle += STEERING_STEP;
+                if (currentAngle > targetAngle) currentAngle = targetAngle;     // prevent overshooting
+            } 
+            else if (currentAngle > targetAngle) {
+                currentAngle -= STEERING_STEP;
+                if (currentAngle < targetAngle) currentAngle = targetAngle;     // prevent overshooting
+            }
+            steeringServo.write(currentAngle);          // write the incrementally smoothed angle to the servo
         }
-        // Smoothly step the physical angle towards the target angle
-        if (currentAngle < targetAngle) {
-            currentAngle += STEERING_STEP;
-            if (currentAngle > targetAngle) currentAngle = targetAngle; // Prevent overshooting
-        } 
-        else if (currentAngle > targetAngle) {
-            currentAngle -= STEERING_STEP;
-            if (currentAngle < targetAngle) currentAngle = targetAngle; // Prevent overshooting
-        }
-        
-        // Write the incrementally smoothed angle to the servo
-        steeringServo.write(currentAngle);
     }
 }

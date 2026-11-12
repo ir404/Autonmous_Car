@@ -21,26 +21,47 @@ The vehicle uses a **Stop-and-Scan** navigation strategy rather than continuous 
 
 ---
 
-## 2. Cloud Coexistence & Instant Override
+## 2. Ultrasonic Distance Sensing (`getDistanceCM()`)
+
+Distance measurements are handled by `getDistanceCM()`, which drives the HC-SR04 sensor via a three-stage acoustic time-of-flight sequence:
+
+1. **Trigger Pulse Generation:**
+   * Pulls `TRIG_PIN` `LOW` for `2 µs` to ensure a clean falling/rising edge.
+   * Sets `TRIG_PIN` `HIGH` for `10 µs`, then pulls it `LOW`. This `10 µs` pulse instructs the HC-SR04 internal controller to emit an 8-cycle burst of 40 kHz ultrasound.
+2. **Echo Timing (`pulseIn()`):**
+   * `pulseIn(ECHO_PIN, HIGH, 30000)` measures how many microseconds `ECHO_PIN` remains `HIGH`—representing the round-trip travel time of the sound wave to an obstacle and back.
+   * If no echo returns within `30,000 µs` (`30 ms`, roughly `5.1 m` round-trip), `pulseIn()` times out and returns `0`, which the function maps to `TIMEOUT_DISTANCE` (`150.0 cm`).
+3. **Time-of-Flight Calculation & Clamping:**
+   * Using the speed of sound in air ($\approx 343\text{ m/s}$, or $0.0343\text{ cm/µs}$), one-way distance in centimetres is computed as:
+     $$\text{Distance (cm)} = \frac{\text{duration (µs)} \times 0.0343}{2}$$
+   * Valid readings above `MAX_SENSOR_RANGE` (`200.0 cm`) are clamped to `200.0 cm` so glancing-angle wall reflections cannot outrank genuinely clear corridors.
+
+### Why `delayMicroseconds()` Is Used Instead of `delay()`
+* **Sub-Millisecond Hardware Timing:** The HC-SR04 requires a strict `10 µs` trigger pulse. Standard `delay()` operates at **millisecond** resolution (`1 ms = 1,000 µs`), making `delay(1)` 100 times too long and incapable of generating microsecond pulses.
+* **Acoustic Travel Scale:** Sound travels `34.3 cm` in a single millisecond (`1,000 µs`). Using `delayMicroseconds()` keeps trigger overhead negligible (`12 µs` total) so `pulseIn()` is immediately ready to catch the rising edge of `ECHO_PIN`—even for obstacles only `2–3 cm` away (`~115–175 µs` round-trip).
+
+---
+
+## 3. Cloud Coexistence & Instant Override
 
 Autonomous mode is activated via Blynk when both the master power switch (`carOn_DS` on `V0`) and the mode switch (`autoMode_DS` on `V6`) are set to `1`.
 
 Because a full sensor sweep and reverse recovery take several hundred milliseconds, standard blocking `delay()` calls would starve `Blynk.run()`, disconnecting the vehicle from the cloud and preventing emergency stops. Instead, all pauses inside the autonomous pipeline route through `waitWithBlynk(durationMs)`:
-* Continuously polls `Blynk.run()` in 5 ms increments during servo settling and motor pulses.
-* Monitors `carOn_DS` and `autoMode_DS` in real time. If either switch is toggled off mid-manoeuvre, the motors halt immediately and control returns to `loop()`.
+- Continuously polls `Blynk.run()` in 5 ms increments during servo settling and motor pulses.
+- Monitors `carOn_DS` and `autoMode_DS` in real time. If either switch is toggled off mid-manoeuvre, the motors halt immediately and control returns to `loop()`.
 
 ---
 
-## 3. Navigation Control Pipeline
+## 4. Navigation Control Pipeline
 
 ### Step 1: Mode Initialisation
 When switching into autonomous mode (`!wasAutoMode`), `runAutonomousMode()` centres both servos to `90°`, clears any leftover scan history (`hasPrevScan = false`), and sets `wasAutoMode = true` so the vehicle always begins scanning from a known neutral alignment.
 
 ### Step 2: Forward Cruise & Straight-Ahead Polling
 While the path ahead is clear (`frontDistance > 20.0 cm`):
-* The sweep servo remains locked at `90°` (dead ahead).
-* The vehicle drives forward at a reduced, controlled PWM duty cycle (`AUTO_MOTOR_SPEED = 140`) to ensure sufficient reaction distance before braking.
-* Whenever unobstructed forward travel occurs, `hasPrevScan` is reset to `false` so stale obstacle data from earlier encounters is discarded.
+- The sweep servo remains locked at `90°` (dead ahead).
+- The vehicle drives forward at a reduced, controlled PWM duty cycle (`AUTO_MOTOR_SPEED = 140`) to ensure sufficient reaction distance before braking.
+- Whenever unobstructed forward travel occurs, `hasPrevScan` is reset to `false` so stale obstacle data from earlier encounters is discarded.
 
 ### Step 3: Obstacle Halt & Bounded Radar Sweep
 As soon as `getDistanceCM()` detects an obstacle at or below `MIN_SAFE_DISTANCE` (`20.0 cm`), `turnOffMotor()` halts the car and calls `scanAndSteer()`:
@@ -70,7 +91,7 @@ Once a valid, non-stalled path is identified:
 
 ---
 
-## 4. Tuning Reference
+## 5. Tuning Reference
 
 All behavioural thresholds are defined as constants at the top of `main_controller/main_controller.ino` for floor calibration:
 

@@ -1,6 +1,6 @@
 # Blynk IoT Cloud & Datastream Specification
 
-This document defines the Blynk Cloud template configuration, virtual pin mappings, and mobile dashboard bindings used by `main_controller/main_controller.ino`[cite: 1].
+This document defines the Blynk Cloud template configuration, virtual pin mappings, and mobile dashboard bindings used by `main_controller/main_controller.ino`.
 
 ---
 
@@ -14,17 +14,17 @@ This document defines the Blynk Cloud template configuration, virtual pin mappin
 
 ## 2. Virtual Pin Datastreams
 
-All datastreams are configured as **Integer** types on the Blynk server[cite: 1]:
+All datastreams are configured as **Integer** types on the Blynk server:
 
 | Virtual Pin | Datastream Name | Firmware Variable | Data Type | Min | Max | Default | Mobile Widget | Functional Role |
 | :--- | :--- | :--- | :--- | :---: | :---: | :---: | :--- | :--- |
-| **`V0`** | `OnOff`[cite: 1] | `carOn_DS` | Integer[cite: 1] | `0`[cite: 1] | `1`[cite: 1] | `0`[cite: 1] | Switch | Master power safety interlock (`0` = Idle/Off, `1` = Active) |
-| **`V1`** | `Move Forward`[cite: 1] | `btnFwd_DS` | Integer[cite: 1] | `0`[cite: 1] | `1`[cite: 1] | `0`[cite: 1] | Push Button | Digital forward drive command (manual mode) |
-| **`V2`** | `Move Back`[cite: 1] | `btnBack_DS` | Integer[cite: 1] | `0`[cite: 1] | `1`[cite: 1] | `0`[cite: 1] | Push Button | Digital reverse drive command (manual mode) |
-| **`V3`** | `Car Speed`[cite: 1] | `carSpeed_DS` | Integer[cite: 1] | `0`[cite: 1] | `255`[cite: 1] | `200`[cite: 1] | Slider | 8-bit PWM duty cycle for manual drive speed |
-| **`V4`** | `CarX`[cite: 1] | `carX_DS` | Integer[cite: 1] | `0`[cite: 1] | `1023`[cite: 1] | `512`[cite: 1] | Joystick (X) | Proportional front-wheel steering angle (`45°`–`135°`) |
-| **`V5`** | `CarY`[cite: 1] | `carY_DS` | Integer[cite: 1] | `0`[cite: 1] | `1023`[cite: 1] | `512`[cite: 1] | Joystick (Y) | Proportional forward/reverse throttle trigger |
-| **`V6`** | `AutoMode`[cite: 1] | `autoMode_DS` | Integer[cite: 1] | `0`[cite: 1] | `1`[cite: 1] | `0`[cite: 1] | Switch | Control mode selector (`0` = Manual, `1` = Autonomous) |
+| **`V0`** | `OnOff` | `carOn_DS` | Integer | `0` | `1` | `0` | Switch | Master power safety interlock (`0` = Idle/Off, `1` = Active) |
+| **`V1`** | `Move Forward` | `btnFwd_DS` | Integer | `0` | `1` | `0` | Push Button | Digital forward drive command (manual mode) |
+| **`V2`** | `Move Back` | `btnBack_DS` | Integer | `0` | `1` | `0` | Push Button | Digital reverse drive command (manual mode) |
+| **`V3`** | `Car Speed` | `carSpeed_DS` | Integer | `0` | `255` | `200` | Slider | 8-bit PWM duty cycle for manual drive speed |
+| **`V4`** | `CarX` | `carX_DS` | Integer | `0` | `1023` | `512` | Joystick (X) | Proportional front-wheel steering angle (`45°`–`135°`) |
+| **`V5`** | `CarY` | `carY_DS` | Integer | `0` | `1023` | `512` | Joystick (Y) | Proportional forward/reverse throttle trigger |
+| **`V6`** | `AutoMode` | `autoMode_DS` | Integer | `0` | `1` | `0` | Switch | Control mode selector (`0` = Manual, `1` = Autonomous) |
 
 ---
 

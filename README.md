@@ -29,6 +29,7 @@ We have assembled the 3D-printed chassis, wired the core drivetrain and sensor s
 -   `main_controller/` - Contains `main_controller.ino`, the master firmware housing the Blynk cloud state machine, `runManualMode()`, and `runAutonomousMode()`.
 -   `diagnostics/` - A suite of standalone test sketches used to isolate and verify individual components (steering smoothing, ultrasonic polling, auto-braking, stop-and-scan radar sweeps).
 -   [`AUTONOMOUS_MODE.md`](AUTONOMOUS_MODE.md) - Technical breakdown of the stop-and-scan pipeline, scan-memory stall detection, counter-steered reverse recovery, and tuning constants.
+-   [`BLYNK_SETUP.md`](BLYNK_SETUP.md) - Specification of Blynk Cloud template settings, virtual pin datastreams (`V0–V6`), and joystick deadzone mappings.
 -   [`TIMELINE.md`](TIMELINE.md) - A detailed, session-by-session development log tracking milestones and hardware learnings.
 
 ## Future Milestones (Planned)

@@ -1,52 +1,77 @@
 /*
-  Diagnostics: Radar Sweep and Autonomous Steering
+  Diagnostics: Stop-and-Scan Autonomous Obstacle Avoidance (with Scan Memory)
   
   File: diagnostics/radar_steering_test.ino
 
-  Description: Sweeps a second servo from 0 to 180 degrees, capturing distances 
-               every 15 degrees into an array. Automatically calculates the most 
-               open path and steers the front wheels towards it.
+  Description: Drives forward while scanning straight ahead. When an obstacle is 
+               detected within 20 cm, the car halts and sweeps a ±30 deg arc 
+               (60–120 deg). Compares consecutive scans to detect physical stalls 
+               and uses counter-steered reversing to swing the nose clear.
 */
 
 #include <ESP32Servo.h>
 
+// Pin definitions
+#define MOTOR_FORWARD       18
+#define MOTOR_REVERSE       19
+#define MOTOR_SPEED          5              // PWM pin for speed control (ENA)
 #define SERVO_PIN           13              // Front wheels steering servo
-#define SWEEP_SERVO_PIN      4              // New servo for ultrasonic sensor
+#define SWEEP_SERVO_PIN      4              // Sweeping ultrasonic sensor servo
 #define TRIG_PIN            12              // Ultrasonic sensor - trigger 
 #define ECHO_PIN            14              // Ultrasonic sensor - echo
 
 Servo steeringServo;
 Servo sweepServo;
 
-// Radar variables
-const int SWEEP_STEP = 15;                  // Degrees between each measurement
-float distances[13];                        // Array to hold 13 readings (0, 15, 30... 180)
-int currentSweepAngle = 0;
-int sweepDirection = 1;                     // 1 for sweeping up, -1 for sweeping down
+// Drive and recovery constants
+const int AUTO_MOTOR_SPEED       = 140;     // Controlled speed (0–255)
+const float MIN_SAFE_DISTANCE    = 20.0;    // Forward stopping threshold in cm
+const float CRITICAL_DISTANCE    = 10.0;    // Reverse if max reading < 10 cm
+const float MIN_CORNER_CLEARANCE = 6.0;     // Reverse if any angle < 6 cm (too tight to pivot)
+const float STALL_MARGIN_CM      = 3.0;     // Max difference between scans to count as stalled
+const int REVERSE_DURATION_MS    = 500;     // Reverse pulse duration in ms (tune on floor)
+const int MAX_REVERSE_ATTEMPTS   = 3;       // Safety cap to prevent endless reversing
 
-const float MIN_SAFE_DISTANCE = 15.0;       // Minimum clearance threshold in cm
+// Ultrasonic range constants
+const float MAX_SENSOR_RANGE     = 200.0;   // Maximum reliable echo distance in cm
+const float TIMEOUT_DISTANCE     = 150.0;   // Fallback value when no echo returns
 
-void setup() {
-    Serial.begin(115200);
-    delay(1000);
+// Servo limits and sweep configuration (±30 deg around 90 deg centre)
+const int SERVO_CENTRE           = 90;      // Neutral centre position for both servos
+const int STEER_LEFT_LIMIT       = 60;      // Max left steering angle (30 deg left of centre)
+const int STEER_RIGHT_LIMIT      = 120;     // Max right steering angle (30 deg right of centre)
+const int SWEEP_MIN_ANGLE        = 60;      // Rightmost sweep limit (30 deg right of centre)
+const int SWEEP_MAX_ANGLE        = 120;     // Leftmost sweep limit (30 deg left of centre)
+const int SWEEP_STEP             = 10;      // Degrees between readings (60, 70, 80, 90, 100, 110, 120)
+const int NUM_SWEEP_STEPS        = ((SWEEP_MAX_ANGLE - SWEEP_MIN_ANGLE) / SWEEP_STEP) + 1;
 
-    Serial.println("\n=== Radar & Steering Diagnostic Starting ===");
+// Scan arrays and stall-detection memory
+float distances[NUM_SWEEP_STEPS];           // Current scan readings
+float prevDistances[NUM_SWEEP_STEPS];       // Previous scan readings for stall comparison
+bool hasPrevScan = false;                   // Tracks whether prevDistances holds valid data
 
-    // Configure sensor pins
-    pinMode(TRIG_PIN, OUTPUT);
-    pinMode(ECHO_PIN, INPUT);
-
-    // Initialise servos
-    steeringServo.attach(SERVO_PIN, 500, 2500);
-    sweepServo.attach(SWEEP_SERVO_PIN, 500, 2500);
-    
-    // Centre both servos at startup
-    steeringServo.write(90);
-    sweepServo.write(90);
-    delay(1000);
+// Halt drive motors
+void turnOffMotor() {
+    digitalWrite(MOTOR_FORWARD, LOW);
+    digitalWrite(MOTOR_REVERSE, LOW);
+    ledcWrite(MOTOR_SPEED, 0);
 }
 
-// Function to measure distance
+// Drive forward at controlled speed
+void goFwd() {
+    digitalWrite(MOTOR_FORWARD, HIGH);
+    digitalWrite(MOTOR_REVERSE, LOW);
+    ledcWrite(MOTOR_SPEED, AUTO_MOTOR_SPEED);
+}
+
+// Reverse at controlled speed
+void reverse() {
+    digitalWrite(MOTOR_FORWARD, LOW);
+    digitalWrite(MOTOR_REVERSE, HIGH);
+    ledcWrite(MOTOR_SPEED, AUTO_MOTOR_SPEED);
+}
+
+// Measure distance in centimetres with timeout clamping
 float getDistanceCM() {
     digitalWrite(TRIG_PIN, LOW);
     delayMicroseconds(2);
@@ -55,71 +80,187 @@ float getDistanceCM() {
     digitalWrite(TRIG_PIN, LOW);
 
     long duration = pulseIn(ECHO_PIN, HIGH, 30000);
-    if (duration == 0) return 400.0;        // Return max range if no echo
-    return (duration * 0.0343) / 2.0;
+    if (duration == 0) return TIMEOUT_DISTANCE;
+
+    float distance = (duration * 0.0343) / 2.0;
+    return (distance > MAX_SENSOR_RANGE) ? MAX_SENSOR_RANGE : distance;
 }
 
-// Function to analyse array and steer
-void evaluatePathAndSteer() {
-    float maxDistance = 0.0;
-    int bestSweepAngle = 90;                // Default to straight ahead
+// Check if current scan matches previous scan within margin (car failed to advance)
+bool isStalled() {
+    if (!hasPrevScan) return false;
 
-    // Find the angle with the maximum clear distance
-    for (int i = 0; i <= 12; i++) {
-        if (distances[i] > maxDistance) {
-            maxDistance = distances[i];
-            bestSweepAngle = i * SWEEP_STEP; // Convert array index back to degrees
+    for (int i = 0; i < NUM_SWEEP_STEPS; i++) {
+        if (fabs(distances[i] - prevDistances[i]) > STALL_MARGIN_CM) {
+            return false;                   // Significant change detected; car moved
+        }
+    }
+    return true;                            // All angles nearly identical; car is stuck
+}
+
+// Store current scan into memory for the next comparison
+void saveScanHistory() {
+    for (int i = 0; i < NUM_SWEEP_STEPS; i++) {
+        prevDistances[i] = distances[i];
+    }
+    hasPrevScan = true;
+}
+
+// Reverse while steering towards the obstacle so the nose swings away from it
+void counterSteerReverse(int closestSweepAngle) {
+    int reverseSteer = map(closestSweepAngle, SWEEP_MIN_ANGLE, SWEEP_MAX_ANGLE, STEER_RIGHT_LIMIT, STEER_LEFT_LIMIT);
+    reverseSteer = constrain(reverseSteer, STEER_LEFT_LIMIT, STEER_RIGHT_LIMIT);
+
+    steeringServo.write(reverseSteer);
+    delay(100);                             // Let steering servo reach angle before moving
+    reverse();
+    delay(REVERSE_DURATION_MS);
+    turnOffMotor();
+    delay(150);                             // Brief settle before next sweep
+
+    hasPrevScan = false;                    // Clear stale history after repositioning
+}
+
+// Sweep 60–120 deg arc; reverse if boxed in, too close to pivot, or stalled
+bool scanAndSteer() {
+    bool pathFound = false;
+    int reverseAttempts = 0;
+
+    while (!pathFound) {
+        // Move sensor to rightmost start limit (60 deg) and allow time to settle
+        sweepServo.write(SWEEP_MIN_ANGLE);
+        delay(150);
+
+        // Sweep from 60 to 120 deg in 10 deg steps
+        for (int angle = SWEEP_MIN_ANGLE, index = 0; angle <= SWEEP_MAX_ANGLE; angle += SWEEP_STEP, index++) {
+            sweepServo.write(angle);
+            delay(80);                      // Wait for servo movement and echo stability
+            distances[index] = getDistanceCM();
+        }
+
+        // Find both the widest gap and the closest obstacle across the sweep
+        float maxDistance = 0.0;
+        float minDistance = MAX_SENSOR_RANGE;
+        int bestSweepAngle = SERVO_CENTRE;
+        int closestSweepAngle = SERVO_CENTRE;
+
+        for (int i = 0; i < NUM_SWEEP_STEPS; i++) {
+            int currentAngle = SWEEP_MIN_ANGLE + (i * SWEEP_STEP);
+
+            if (distances[i] > maxDistance) {
+                maxDistance = distances[i];
+                bestSweepAngle = currentAngle;
+            }
+            if (distances[i] < minDistance) {
+                minDistance = distances[i];
+                closestSweepAngle = currentAngle;
+            }
+        }
+
+        bool stalled = isStalled();
+
+        Serial.print("Scan Complete | Max: ");
+        Serial.print(maxDistance, 1);
+        Serial.print(" cm (at ");
+        Serial.print(bestSweepAngle);
+        Serial.print(" deg) | Min: ");
+        Serial.print(minDistance, 1);
+        Serial.print(" cm (at ");
+        Serial.print(closestSweepAngle);
+        Serial.println(" deg)");
+
+        // Reverse if boxed in, corner is too close to pivot, or scan matches last position
+        if (maxDistance < CRITICAL_DISTANCE || minDistance < MIN_CORNER_CLEARANCE || stalled) {
+            if (reverseAttempts >= MAX_REVERSE_ATTEMPTS) {
+                Serial.println("--> Trapped after max reverse attempts. Remaining stopped.");
+                steeringServo.write(SERVO_CENTRE);
+                break;
+            }
+
+            if (stalled) {
+                Serial.println("--> Stall detected (scan matches history). Counter-reversing...");
+            } else if (minDistance < MIN_CORNER_CLEARANCE) {
+                Serial.println("--> Corner too close (< 6 cm) to turn. Counter-reversing...");
+            } else {
+                Serial.println("--> All paths < 10 cm. Counter-reversing...");
+            }
+
+            counterSteerReverse(closestSweepAngle);
+            reverseAttempts++;
+        }
+        // Valid path found and car is not stalled -> save scan and steer towards widest gap
+        else {
+            saveScanHistory();
+
+            int mappedAngle = map(bestSweepAngle, SWEEP_MIN_ANGLE, SWEEP_MAX_ANGLE, STEER_RIGHT_LIMIT, STEER_LEFT_LIMIT);
+            int steeringAngle = constrain(mappedAngle, STEER_LEFT_LIMIT, STEER_RIGHT_LIMIT);
+            steeringServo.write(steeringAngle);
+            pathFound = true;
+
+            Serial.print("--> Steering front wheels to ");
+            Serial.print(steeringAngle);
+            Serial.println(" deg.");
         }
     }
 
-    Serial.print("Sweep Complete. Best Path at Sweep Angle: ");
-    Serial.print(bestSweepAngle);
-    Serial.print(" deg (Clearance: ");
-    Serial.print(maxDistance);
-    Serial.println(" cm)");
-
-    // Decision Logic
-    if (maxDistance > MIN_SAFE_DISTANCE) {
-        // Map the radar's best angle to the steering mechanism's limits (45 to 135)
-        // Assuming Sweep 0 = Right and Sweep 180 = Left
-        int steeringAngle = map(bestSweepAngle, 0, 180, 135, 45); 
-        
-        Serial.print("--> DECISION: Path clear. Steer wheels to ");
-        Serial.println(steeringAngle);
-        steeringServo.write(steeringAngle);
-    } 
-    else {
-        Serial.println("--> DECISION: ALL PATHS BLOCKED (< 15cm). Keep wheels straight to halt/reverse.");
-        steeringServo.write(90); 
-    }
+    // Return ultrasonic sensor to centre before resuming
+    sweepServo.write(SERVO_CENTRE);
+    delay(150);
     Serial.println("--------------------------------------------------");
+
+    return pathFound;
+}
+
+void setup() {
+    Serial.begin(115200);
+    delay(1000);
+
+    Serial.println("\n=== Stop-and-Scan Autonomous Diagnostic Starting ===");
+
+    // Configure PWM and motor pins
+    ledcAttach(MOTOR_SPEED, 1000, 8);        // 1 kHz, 8-bit resolution
+    pinMode(MOTOR_FORWARD, OUTPUT);
+    pinMode(MOTOR_REVERSE, OUTPUT);
+
+    // Configure ultrasonic sensor pins
+    pinMode(TRIG_PIN, OUTPUT);
+    pinMode(ECHO_PIN, INPUT);
+
+    // Initialise and centre both servos
+    steeringServo.attach(SERVO_PIN, 500, 2500);
+    sweepServo.attach(SWEEP_SERVO_PIN, 500, 2500);
+    steeringServo.write(SERVO_CENTRE);
+    sweepServo.write(SERVO_CENTRE);
+
+    turnOffMotor();
+    delay(1000);
 }
 
 void loop() {
-    // 1. Move sensor to current angle
-    sweepServo.write(currentSweepAngle);
-    
-    // 2. Allow time for servo mechanical movement and sensor ping
-    delay(50); 
-    
-    // 3. Take measurement and save to array index (e.g., angle 45 / 15 = index 3)
-    int arrayIndex = currentSweepAngle / SWEEP_STEP;
-    distances[arrayIndex] = getDistanceCM();
+    // Continuously scan straight ahead
+    float frontDistance = getDistanceCM();
 
-    // 4. Update the sweep angle for the next loop
-    currentSweepAngle += (SWEEP_STEP * sweepDirection);
+    if (frontDistance > 0 && frontDistance <= MIN_SAFE_DISTANCE) {
+        // 1. Stop immediately upon detecting an obstacle within 20 cm
+        turnOffMotor();
+        Serial.print("Obstacle at ");
+        Serial.print(frontDistance, 1);
+        Serial.println(" cm -> Halting to scan.");
 
-    // 5. Check if sweep hit the boundaries (0 or 180)
-    if (currentSweepAngle >= 180 || currentSweepAngle <= 0) {
-        // Ensure we capture the absolute edge (0 or 180) before evaluating
-        sweepServo.write(currentSweepAngle);
-        delay(50);
-        distances[currentSweepAngle / SWEEP_STEP] = getDistanceCM();
+        // 2. Sweep arc, check stall memory, steer, and re-centre sensor
+        bool clearPathAvailable = scanAndSteer();
 
-        // Evaluate the full array and steer the front wheels
-        evaluatePathAndSteer();
-
-        // Reverse the sweep direction for the next pass
-        sweepDirection *= -1; 
+        // 3. Resume driving if a path was selected
+        if (clearPathAvailable) {
+            goFwd();
+            delay(350);                     // Brief turn pulse so front sensor clears the obstacle
+        }
+    } 
+    else {
+        // Path ahead is clear; clear old obstacle memory and drive forward
+        hasPrevScan = false;
+        goFwd();
     }
+
+    delay(50);
 }

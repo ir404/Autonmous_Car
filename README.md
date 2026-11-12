@@ -6,31 +6,32 @@ This is an ongoing university elective project focused on designing, assembling,
 This project integrates hardware assembly, real-time electronics, path planning, and telemetry into a complete software architecture.
 
 ## Current Project Status
-We have successfully assembled the 3D-printed chassis, wired the core drivetrain components, and established a cloud connection. Currently, the car can be remotely controlled over Wi-Fi using a custom mobile app interface featuring dynamic joystick mapping and algorithmically smoothed steering. We have established a dual Auto/Manual mode architecture and are currently working on integrating the ultrasonic sensor and its panning servo for our first layer of autonomous environmental perception.
+We have assembled the 3D-printed chassis, wired the core drivetrain and sensor subsystems, and integrated both manual teleoperation and autonomous obstacle avoidance into `main_controller.ino`. Over Wi-Fi via the Blynk mobile app, the vehicle supports smooth joystick-driven manual control as well as an instant-override autonomous mode powered by a **Stop-and-Scan** radar routine (`±30°` sweep arc), scan-memory stall detection, and counter-steered reverse recovery.
 
-## Hardware Components (So Far)
+## Hardware Components
 -   **Microcontroller:** ESP32 Development Board (features built-in Wi-Fi and Bluetooth)
 -   **Chassis:** Custom 3D-printed body
 -   **Drivetrain:** TT Motors & standard rear wheels
--   **Motor Driver:** (Used to safely deliver sufficient power from the batteries to the TT motors)
--   **Steering:** Servo Motor (connected to front wheel linkage)
--   **Sensors:** HC-SR04 Ultrasonic Sensor (for obstacle distance measurement - integration in progress)
--   **Sensor Sweep:** Second Servo Motor (to pan the ultrasonic sensor 180° - hardware pending)
--   **Power Supply:** 2x 3.7V batteries connected to meet the voltage/current requirements, plus a master power switch.
+-   **Motor Driver:** Dual H-bridge motor driver (delivers regulated current from the batteries to the TT motors)
+-   **Steering:** Servo Motor (connected to front wheel linkage on `GPIO 13`)
+-   **Sensors:** HC-SR04 Ultrasonic Sensor (`GPIO 12` Trigger, `GPIO 14` Echo) for forward and angular obstacle distance measurement
+-   **Sensor Sweep:** SG90 Micro Servo (`GPIO 4`) mounted with the HC-SR04 to sweep a bounded `60°–120°` arc
+-   **Power Supply:** 2x 3.7V batteries connected in series to meet voltage/current requirements, plus a master power switch
 
 ## Software & Tools
 -   **Programming Environment:** Arduino IDE (C++)
--   **IoT Platform:** Blynk Cloud & Blynk Mobile App (for remote control and telemetry)
+-   **IoT Platform:** Blynk Cloud & Blynk Mobile App (for remote control, mode switching, and telemetry)
 -   **Libraries Used:**
     -   `BlynkSimpleEsp32` (v1.4.0) - Handles Wi-Fi connection and cloud communication.
-    -   `ESP32Servo` (v3.0.5) - Generates 50Hz PWM signals for the servos without hardware timer conflicts.
+    -   `ESP32Servo` (v3.0.5) - Generates 50Hz PWM signals for the steering and sweep servos without hardware timer conflicts.
 
 ## Directory Structure
--   `main_controller/` - Contains the main project sketch housing the master state machine, teleoperation, and autonomous modes.
--   `diagnostics/` - A suite of standalone test sketches used to isolate and verify individual components (steering smoothing, ultrasonic polling, auto-braking, radar sweeps).
--   [`DEV_TIMELINE.md`](DEV_TIMELINE.md) - A detailed, session-by-session development log tracking milestones and hardware learnings.
+-   `main_controller/` - Contains `main_controller.ino`, the master firmware housing the Blynk cloud state machine, `runManualMode()`, and `runAutonomousMode()`.
+-   `diagnostics/` - A suite of standalone test sketches used to isolate and verify individual components (steering smoothing, ultrasonic polling, auto-braking, stop-and-scan radar sweeps).
+-   [`AUTONOMOUS_MODE.md`](AUTONOMOUS_MODE.md) - Technical breakdown of the stop-and-scan pipeline, scan-memory stall detection, counter-steered reverse recovery, and tuning constants.
+-   [`TIMELINE.md`](TIMELINE.md) - A detailed, session-by-session development log tracking milestones and hardware learnings.
 
 ## Future Milestones (Planned)
--   Integrate ultrasonic sensor logic to auto-brake when obstacles are detected.
--   Implement a 180° radar scan routine for obstacle avoidance and path planning.
--   Add a camera module for AI-based environment perception and image processing.
+-   Train an AI model for sign recognition to aid with autonmous driving.
+-   Add a camera module for AI-based environment perception and vision-guided navigation.
+-   Stream live distance telemetry and autonomous state feedback to the Blynk dashboard.

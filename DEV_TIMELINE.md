@@ -34,3 +34,10 @@ This document tracks our team's weekly progress, hardware learnings, and softwar
     - [Obstacle Auto-Stop Test](diagnostics/obstacle_stop_test/obstacle_stop_test.ino)
     - [Radar Sweep & Autonomous Steering Test](diagnostics/radar_steering_test/radar_steering_test.ino)
     - [Blynk Joystick Teleoperation Test](diagnostics/joystick_test/joystick_test.ino)
+
+### Session 5: 12 November 2026 - Radar Hardware Mounting & Autonomous Integration
+-   **Repository Restructuring:** Renamed the main firmware sketch from `car_wip` to `main_controller/main_controller.ino` and added standardised project header documentation.
+-   **Radar Servo Mounting & Calibration:** Mounted the second SG90 micro servo onto the chassis with the HC-SR04 ultrasonic sensor attached (wired to 5V power, common GND, and GPIO 4). Verified mechanical horn centring at `90°` and confirmed matching left/right steering and sweep polarity.
+-   **Stop-and-Scan Avoidance Logic:** Evolved [Radar Sweep & Autonomous Steering Test](diagnostics/radar_steering_test/radar_steering_test.ino) from continuous sweeping to a stop-and-scan routine—polling straight ahead while driving at a controlled autonomous PWM speed (`140`), halting within `20 cm`, scanning for the widest gap, and re-centring before resuming.
+-   **Reflection & Stall Mitigation:** Identified specular ultrasonic reflections at extreme sweep angles and physical turning-radius limits near walls. Bounded the autonomous sweep and steering arc to `±30°` (`60°` to `120°` in `10°` steps), clamped sensor timeouts, and implemented scan-memory stall detection (`prevDistances[]` with a `3.0 cm` margin), a `6.0 cm` minimum corner clearance threshold, and counter-steered reverse recovery to swing the nose clear of obstacles.
+-   **Master Firmware Integration:** Integrated the autonomous navigation pipeline into `main_controller.ino` with non-blocking `waitWithBlynk()` delays so cloud telemetry remains active and manual override (`V0`/`V6`) responds immediately mid-manoeuvre. Refactored `loop()` into dedicated `runAutonomousMode()` and `runManualMode()` functions and removed debug `Serial` overhead for untethered floor testing.
